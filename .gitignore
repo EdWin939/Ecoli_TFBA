@@ -1,0 +1,6 @@
+# Ignore massive SQLite databases
+*.sqlite
+
+# Ignore Fiji installation and Java modules
+Labwork/Fiji/
+*.zip

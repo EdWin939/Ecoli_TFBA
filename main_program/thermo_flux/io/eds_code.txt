@@ -1,0 +1,409 @@
+""" 
+Ed's code from a Jupyter notebook
+See: thermo_flux/examples/yeast/Excel_to_COBRA_pipieline_Vakil_03.ipynb
+"""
+
+# PACKAGES:
+import cobra
+import pandas as pd
+import re
+#from equilibrator_api import ComponentContribution, Q_
+#cc = ComponentContribution(rmse_inf = Q_(3000, 'kilojoule / mole')) #define max possible uncertainty in dfG here
+import numpy as np
+from cobra import Reaction, Metabolite
+import eQuilibrator_functions_dev as eQ
+
+# --- Cell 1 ---
+#import excel file into pandas dfs 
+xls = pd.ExcelFile("yeast_v3.SV_ENS_03.xlsx")
+
+# Now you can list all sheets in the file
+display(xls.sheet_names)
+
+# to read all sheets to a map
+sheet_to_df_map = {}
+for sheet_name in xls.sheet_names:
+    sheet_to_df_map[sheet_name] = xls.parse(sheet_name)
+
+
+# --- Cell 2 ---
+#generate a cobra model and populate with the reactions from the excel sheet
+model = cobra.Model("model")
+sheets = ['Reactions']
+for sheet in sheets:
+   # print(sheet)
+    df = sheet_to_df_map[sheet]
+    
+    for index, row in df.iterrows():
+        r = cobra.Reaction(row['Abbrevation'])#note misspelling
+        model.add_reaction(r)
+        r.build_reaction_from_string(row['Reaction'])
+
+
+# --- Cell 3 ---
+#add biomass reaction
+sheets = ['Biomass Composition' ]
+for sheet in sheets:
+   # print(sheet)
+    df = sheet_to_df_map[sheet]
+    for index, row in df.iterrows():
+        r = cobra.Reaction(row['Abbrevation'])#note misspelling
+        model.add_reaction(r)
+        r.build_reaction_from_string(row['Reaction'])
+
+
+# --- Cell 4 ---
+#add exchange reactions
+df = sheet_to_df_map['Exchange reactions']  
+for index, row in df.iterrows():
+    r = cobra.Reaction(row['Abbrevation'])
+    model.add_reaction(r)
+    r.build_reaction_from_string(row['Reaction'])
+    
+#don't change direction of exhcange reactions this time! 
+    #for met, stoich in r.metabolites.items():
+     #   r.add_metabolites({met:-2*stoich})
+
+
+# --- Cell 5 ---
+#transmembrane reactions have to be imported carefully for proper proton and charge balancing and drG calcualtion 
+df = sheet_to_df_map['Transmembrane reactions']
+    
+for index, row in df.iterrows():
+    print(row['Abbrevation'])
+    transmembrane = re.sub("{[^}]+}", "",row['Transmembrane transport'])
+    try:
+        intracellular = row['Intracellular part']
+    except:
+        intracellular = 0
+        
+    rxn = transmembrane
+    print(rxn)
+    r = cobra.Reaction(row['Abbrevation'])
+    model.add_reaction(r)
+    r.build_reaction_from_string(rxn)
+    
+    if type(intracellular) == str:
+        rxn = intracellular
+        print(rxn)
+        r = cobra.Reaction('int'+row['Abbrevation'])
+        model.add_reaction(r)
+        r.build_reaction_from_string(rxn)
+
+
+# --- Cell 6 ---
+#update metabolite compartments in cobra model object 
+for met in model.metabolites:
+    comp = re.search("(?<=\[)(.*)(?=\])",met.id).group()
+    met.compartment = comp
+    name = met.id
+    ID = name[0 : name.index("[")] + "_" +comp
+    met.id = ID
+    met.name = ID
+
+
+# --- Cell 7 ---
+#a new metabolite biomass_c and biomass_e is made to account for the export of biomass from the system 
+biomass_c = Metabolite(id='biomass_c',name = 'biomass',compartment = 'c')
+biomass_e = Metabolite(id='biomass_e',name = 'biomass',compartment = 'e')
+
+biomass_rxn = model.reactions.biomass
+biomass_rxn.id = 'biomass_c'
+biomass_rxn.add_metabolites({
+   biomass_c: 1.0})
+
+reaction = Reaction(id='biomass_ce',lower_bound=-1000,upper_bound=1000)
+reaction.add_metabolites({
+    biomass_c: -1.0,
+    biomass_e: 1.0,
+    })
+
+model.add_reactions([reaction])
+
+reaction = Reaction(id='biomass_EX',lower_bound=-1000,upper_bound=1000)
+reaction.add_metabolites({
+    biomass_e: -1.0})
+
+model.add_reactions([reaction])
+
+
+# --- Cell 8 ---
+#assign the kegg id of all the metabolites 
+df = pd.read_csv("yeast_kegg_id.csv")
+df = df.set_index('Name')
+kegg_ids = df.to_dict(orient="index")
+
+for met in model.metabolites:
+    met.charge= 0
+    met.name = met.id
+    #print(met.name)
+    try:
+        kegg = kegg_ids[met.name[0 : met.name.index("_")]]['Kegg']
+        #print(kegg)
+    
+        met.annotation['metanetx.chemical'] = "Kegg:"+kegg
+    except:
+        try:
+            if met.name[0 : met.name.index("_")] == 'charge':
+                met.annotation['metanetx.chemical'] = "metanetx.chemical:MNXM45842"
+                
+            elif met.name[0 : met.name.index("_")] == 'electron':
+                met.annotation['metanetx.chemical'] = 'metanetx.chemical:MNXM861'
+            
+            else:
+                met.annotation['metanetx.chemical'] = "Kegg:C00080"
+                #met.annotation['metanetx.chemical'] = "BIOMASS"
+                print(met.name, 'compound unknown!  assigned as nothing')
+        except:
+            met.annotation['metanetx.chemical'] = "Kegg:C00080"
+           # met.annotation['metanetx.chemical'] = "BIOMASS"
+            print(met.name, 'compound unknown!  assigned as nothing')
+            
+    if met.id[:-2] == 'biomass':
+        met.annotation['metanetx.chemical'] = "BIOMASS"
+        print(met.name, 'assigned as biomass')
+
+
+# --- Cell 9 ---
+model.metabolites.charge_c.charge = 1
+model.metabolites.charge_m.charge = 1
+model.metabolites.charge_e.charge = 1
+
+model.metabolites.electron_c.charge = -1
+model.metabolites.electron_m.charge = -1
+
+model.metabolites.ficytc_c.charge = 3 #oxidised charge +3
+model.metabolites.focytc_c.charge = 2 #reduced charge +2
+
+model.metabolites.h_c.formula = 'H1'
+model.metabolites.h_m.formula = 'H1'
+model.metabolites.h_e.formula = 'H1'
+
+#the number of protons in biomass is defined here - this is related to the calcualton of drG for biomass leaving the system 
+#!ToDo update this for each biomass macromolecule 
+#Don't assign protons in biomass here - calculate it from precurosr protons 
+#model.metabolites.biomass_e.formula = 'H67'
+#model.metabolites.biomass_c.formula = 'H67'
+
+
+
+# --- Cell 10 ---
+#remove the electrons as they are automatically acounted for in transporter balancing
+electrons = [model.metabolites.electron_c, model.metabolites.electron_m]
+model.remove_metabolites(electrons)
+
+
+# --- Cell 11 ---
+#Define pH and potentials- format built from multiTFA design 
+#note these are input here and not from the spreadsheet but this coud be changed 
+
+membrane_pot = {'cm':-0.16,
+                'ce':0.06,
+               }
+membrane_pot_rev = {}
+for pair, value in membrane_pot.items():
+    membrane_pot_rev[(pair[::-1])] = value*-1
+    
+membrane_pot.update(membrane_pot_rev)
+#Empty del_psi dict with all compartments
+del_psi_dict = {
+    comp :{comp:0 for comp in model.compartments.keys()
+}
+    for comp in model.compartments.keys()
+}
+
+
+# populate del_psi dict
+for k, v in membrane_pot.items():
+    # Each k is a two letter string, 1st letter - comp#1, 2nd letter - comp #2.
+    del_psi_dict[k[0]][k[1]]= v
+
+
+pH_I_dict = {
+    "pH": {'m':7.4,
+           'c':7, 
+           'e':5   },             
+    "I": {k:0.2 for k in model.compartments.keys()},
+    "pMg": {k:14 for k in model.compartments.keys()},
+    "temperature":{k:303.15 for k in model.compartments.keys()}
+    }
+
+
+# Define membrane potential and compartment information in Dataframes
+del_psi = pd.DataFrame.from_dict(data=del_psi_dict)
+comp_info = pd.DataFrame.from_dict(data=pH_I_dict)
+
+display(del_psi)
+display(comp_info)
+
+
+# --- Cell 12 ---
+#save the model before the new charge and proton balance is added
+cobra.io.write_sbml_model(model, "yeast_vakil_unbalanced_02b.xml")
+
+
+
+# --- Cell 13 ---
+#reload the model in case starting from here 
+model = cobra.io.read_sbml_model("yeast_vakil_unbalanced_02b.xml")
+
+
+# --- Cell 14 ---
+int_reactions = []
+int_reaction_list = []
+#balance and then combine transporters 
+#previously we separately imported the internal and transmembrane parts of transport reactions
+#we now need balance and combine these reactions 
+for rxn in model.reactions:
+    if rxn.id.startswith("int"):
+        int_reactions.append(rxn)
+        rxn_list = [rxn, model.reactions.get_by_id(rxn.id.strip('int'))]
+        int_reaction_list.append(rxn_list)
+        print(rxn)
+
+
+# --- Cell 15 ---
+for rxn in int_reactions:
+    trans_info = eQ.net_transport_reaction_b(rxn, comp_info, del_psi, v = False)#set v=False to hide output
+
+    inner_comp = trans_info[10]
+    outer_comp = trans_info[11]
+
+    net_inner_prot = trans_info[12]
+    net_outer_prot = trans_info[13]
+
+    #inner comp protons
+    proton = "h_"+"".join(inner_comp)
+    rxn.add_metabolites({proton: -1*net_inner_prot})
+
+    if len(rxn.compartments) > 1:
+        #outer comp protons 
+        proton = "h_"+"".join(outer_comp)
+        rxn.add_metabolites({proton: -1*net_outer_prot})
+     
+
+
+# --- Cell 16 ---
+def rxn_merge(rxn_list):
+    met_list = []
+    for rxn in rxn_list:
+        if "int" in rxn.id:
+            metabolites = rxn.metabolites
+            rxn.delete()
+        
+    for rxn in rxn_list:
+        if "int" not in rxn.id:
+            rxn.add_metabolites(metabolites)
+
+
+# --- Cell 17 ---
+#merge transport reactions ready for drG calculation 
+#note these stoichiometries are not final and proton balancing is still required 
+for rxns in int_reaction_list:
+    rxn_merge(rxns)
+
+
+# --- Cell 18 ---
+def get_reactions_string(reaction, excluded_mets):
+    #excluded metabolites are generally redox carriers that equilibrator does not recognise 
+      
+    reactants = [str(abs(reaction.get_coefficient(metabolite.id))) + ' ' + metabolite.annotation['metanetx.chemical']
+                for metabolite in reaction.reactants if 'metanetx.chemical' in metabolite.annotation and metabolite not in excluded_mets]
+    
+    products = [str(reaction.get_coefficient(metabolite.id))+ ' ' + metabolite.annotation['metanetx.chemical']
+                for metabolite in reaction.products if 'metanetx.chemical' in metabolite.annotation and metabolite not in excluded_mets]
+                           
+    
+    reactants_string = ' + '.join(reactants)
+    products_string = ' + '.join(products)
+    reaction_string = reactants_string + ' = ' + products_string
+    #print(reaction_string)
+    
+    compartment = list(reaction.compartments)
+    
+    return reaction_string, compartment 
+
+
+# --- Cell 19 ---
+#metabolites to exclude form drG calcualtion 
+#redox carriers - we add the standard drG0' for these later 
+redox_carriers = ['focytc_c','ficytc_c']#, 'q8_c','q8h2_c']
+excluded_mets = [(model.metabolites.get_by_id(met)) for met in redox_carriers]
+
+#generate reaction list for eQuilibrator 
+reaction_list = []
+reaction_compartment = []
+reaction_id = []
+for reaction in model.reactions: 
+   # print(reaction.id)
+    reaction_string, compartment = get_reactions_string(reaction, excluded_mets)
+    phased_reaction = cc.parse_reaction_formula(reaction_string)
+    reaction_list.append(phased_reaction)
+    reaction_compartment.append(compartment)
+    reaction_id.append(reaction.id)
+
+
+# --- Cell 20 ---
+#check reactions are balanced note this ignores protons 
+#biomass reactions and reactions with ignored redox carriers are unbalanced - this is fine
+for index, rxn in enumerate(reaction_list):
+    reaction = model.reactions.get_by_id(reaction_id[index])
+    ignore = False
+    if reaction.boundary == False:
+        if 'biomass' not in reaction.id:
+            if 'tx' not in reaction.id:
+                mets = [met.id for met in reaction.metabolites]
+                for met in mets:
+                    if 'ACP' in met:
+                        ignore = True
+                        pass
+                if ignore == False:     
+                    if rxn.is_balanced() == False:
+                        print(index, reaction,'\n', rxn._get_reaction_atom_bag(),'\n')
+
+
+# --- Cell 21 ---
+#calculate drG0 covariance 
+cc.temperature=Q_("303.15 K")
+reactions = reaction_list
+multi_dG, standard_dgr_Q = cc.standard_dg_multi(
+    reactions,
+    uncertainty_representation="fullrank")
+
+#save un-transformed drG for later use in nullspace constraint 
+pd.DataFrame(multi_dG.m).to_pickle('multi_dG_2.pkl')
+
+#add unknown drG to covariance matrix for biomass synthesis reacitons 
+for i, rxn in enumerate(model.reactions):
+    if 'reaction' in rxn.id:
+        print(rxn.id, i)
+        p = Q_(np.zeros((289,1)), 'kilojoule/mole')#column of zeros for a new DOF
+        p[i] = Q_(-3000, 'kilojoule/mole')
+        p[[rxn.id for rxn in model.reactions].index('biomass_c')] = Q_(3000, 'kilojoule/mole')
+        standard_dgr_Q = np.append(standard_dgr_Q, p, axis = 1)
+        print(standard_dgr_Q.shape)
+        
+#covariance matrix (not actually needed but can be inspected)        
+cov = standard_dgr_Q @ standard_dgr_Q.T
+cov_df = pd.DataFrame(cov.m)
+cov_df.index = reaction_id
+cov_df.columns = reaction_id
+
+#export fullrank covariance as csv file for later GAMS conversion 
+Q = {}
+for i, rxn_id in enumerate(reaction_id):
+    Q[rxn_id] = standard_dgr_Q.m[i]
+
+Q_df = pd.DataFrame.from_dict(Q)
+Q_df.to_csv('Qdata_vakil_excel_2.csv')
+
+#convert covariance matrix to standard errors for old pipieline
+multi_error = standard_dgr_Q.m @ standard_dgr_Q.m.T
+error_multi = list(np.sqrt(multi_error.diagonal()).flat) #this is same method as equilibrator_batch.py script  
+
+
+
+
+# (...)
+# (...)
+# (...)
