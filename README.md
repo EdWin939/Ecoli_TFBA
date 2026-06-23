@@ -3,7 +3,7 @@
 ## Overview
 This repository contains the code and experimental data for analyzing thermodynamic constarints impact on flux balance analysis of E. coli. 
 This work was recently presented at RUG Honours College Closing symposium 2026.
-
+```
 ## Repository Structure
 Labwork/
 ├── Experiments/       # Original TIF files from the fluorescent microscopy, analysis scripts and a .pkl file output
@@ -14,19 +14,19 @@ Labwork/
 └── microbejSettings.xml  # Parameters used in ImageJ analysis
 main_program/
 ├── examples/ecoli/textbook
-    ├── datafiles/
-        ├── allPhysioData_formatted.csv   # Original transport flux data from José Losa
-        ├── metabolimics_Kochanowski.csv  # Original metabolite concentration data from Kochanowski et al. https://pmc.ncbi.nlm.nih.gov/articles/PMC5293157/
-        ├── cleaned.scv                   # Cleaned versions of metabolite and flux data
-        └── regressed_qm.npy  # Results of different regressions to avoid rerunning them
-    ├── Ecoli_example_textbook.ipynb   # Original example notebook from `Thermo-Flux` ceators
-    ├── final_ecoli_core_norange.ipynb # Main code fro builfing TFBA model, regression, prediction, and creating final figures
-    └── methods_output.csv  # Saved final prediction values from all models. used for plotting without rerunning
+│   ├── datafiles/
+│   │   ├── allPhysioData_formatted.csv   # Original transport flux data from José Losa
+│   │   ├── metabolimics_Kochanowski.csv  # Original metabolite concentration data from Kochanowski et al. https://pmc.ncbi.nlm.nih.gov/articles/PMC5293157/
+│   │   ├── cleaned.csv                   # Cleaned versions of metabolite and flux data
+│   │   └── regressed_qm.npy  # Results of different regressions to avoid rerunning them
+│   ├── Ecoli_example_textbook.ipynb   # Original example notebook from `Thermo-Flux` creators
+│   ├── final_ecoli_core_norange.ipynb # Main code fro builfing TFBA model, regression, prediction, and creating final figures
+│   └── methods_output.csv  # Saved final prediction values from all models. used for plotting without rerunning
 ├── final/ fluxes.csv    # All predicted fluxes on all conditions for variously constrained models. Saved for plotting
 ├── license and setup files
-├── README.md  # Gurobi instalation instructions
+├── README.md  # Gurobi installation instructions
 └── thermo_flux/    # The oriignal `Thermo-Flux` package with minor but possibly necessary edits.
-
+```
 
 ## Setup and Requirements
 To run this project, you will need to set up a few dependencies that are not included in this repository due to file size limits:
